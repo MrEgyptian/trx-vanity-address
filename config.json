@@ -1,0 +1,29 @@
+{
+  "patterns": {
+    "consecutive_3": "连续3个相同数字",
+    "consecutive_4": "连续4个相同数字",
+    "consecutive_5": "连续5个相同数字",
+    "repeat_8_3": "包含至少3个数字8",
+    "repeat_9_3": "包含至少3个数字9",
+    "repeat_6_4": "包含至少4个数字6",
+    "repeat_7_4": "包含至少4个数字7",
+    "custom_888": "包含888",
+    "custom_999": "包含999",
+    "custom_666": "包含666",
+    "custom_777": "包含777",
+    "ends_consecutive_3": "尾号连续3个相同字符",
+    "ends_consecutive_4": "尾号连续4个相同字符",
+    "ends_consecutive_5": "尾号连续5个相同字符"
+  },
+  "default_settings": {
+    "max_addresses": 10,
+    "batch_size": 10000,
+    "use_gpu": true,
+    "save_results": true
+  },
+  "advanced_patterns": {
+    "palindrome": "回文数字",
+    "ascending": "递增数字",
+    "descending": "递减数字"
+  }
+}

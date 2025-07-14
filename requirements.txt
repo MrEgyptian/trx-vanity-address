@@ -1,0 +1,9 @@
+
+pycryptodome==3.19.0
+numpy==1.24.3
+tqdm==4.66.1
+colorama==0.4.6
+base58==2.1.1
+ecdsa==0.18.0
+mnemonic==0.20
+hdwallet==2.2.1 
