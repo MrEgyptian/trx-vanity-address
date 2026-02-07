@@ -42,13 +42,6 @@ try:
         MNEMONIC_AVAILABLE = False
         print("⚠️  助记词功能不可用，将只生成私钥")
 
-    # 可选的快速椭圆曲线实现
-    try:
-        from coincurve import PrivateKey as CoincurvePrivateKey
-        COINCURVE_AVAILABLE = True
-    except ImportError:
-        COINCURVE_AVAILABLE = False
-
     # 可选的tronpy地址派生
     try:
         from tronpy.keys import PrivateKey as TronPrivateKey
@@ -82,18 +75,16 @@ class TRXVanityGenerator:
             'found_vanity': 0,
             'start_time': time.time()
         }
-        self._gpu_mnemonic_warned = False
         
         if self.use_gpu:
             gpu_info = self._get_gpu_info()
+            print 
             print(f"{Fore.GREEN}✓ GPU加速已启用{Style.RESET_ALL}")
             if gpu_info:
                 print(f"{Fore.CYAN}GPU信息: {gpu_info}{Style.RESET_ALL}")
         else:
             print(f"{Fore.YELLOW}⚠ GPU不可用，使用CPU模式{Style.RESET_ALL}")
 
-        if COINCURVE_AVAILABLE:
-            print(f"{Fore.GREEN}✓ 使用coincurve快速CPU路径{Style.RESET_ALL}")
         if TRONPY_AVAILABLE:
             print(f"{Fore.GREEN}✓ 使用tronpy地址派生{Style.RESET_ALL}")
     
@@ -110,21 +101,9 @@ class TRXVanityGenerator:
     def _generate_private_key(self) -> bytes:
         """生成随机私钥"""
         return os.urandom(32)
-
-    def _generate_private_keys_gpu(self, batch_size: int) -> List[bytes]:
-        """使用GPU生成随机私钥列表"""
-        if not self.use_gpu or not CUPY_AVAILABLE:
-            return [self._generate_private_key() for _ in range(batch_size)]
-
-        random_bytes = cp.random.randint(0, 256, size=(batch_size, 32), dtype=cp.uint8)
-        random_bytes = cp.asnumpy(random_bytes)
-        return [bytes(row) for row in random_bytes]
     
     def _private_key_to_public_key(self, private_key: bytes) -> bytes:
         """从私钥生成公钥"""
-        if COINCURVE_AVAILABLE:
-            # coincurve使用libsecp256k1，速度更快
-            return CoincurvePrivateKey(private_key).public_key.format(compressed=False)
         signing_key = ecdsa.SigningKey.from_string(private_key, curve=ecdsa.SECP256k1)
         verifying_key = signing_key.get_verifying_key()
         return b'\x04' + verifying_key.to_string()
@@ -266,40 +245,19 @@ class TRXVanityGenerator:
     
     def generate_batch_cpu(self, batch_size: int = 10000) -> List[Tuple[str, str, str]]:
         """使用CPU批量生成地址（包含助记词）"""
-        return list(self.generate_batch_cpu_iter(batch_size))
-
-    def generate_batch_cpu_iter(self, batch_size: int = 10000):
-        """使用CPU批量生成地址（迭代器）"""
-        if MNEMONIC_AVAILABLE:
-            for _ in range(batch_size):
-                yield self.generate_single_address()
-            return
-
-        random_blob = os.urandom(batch_size * 32)
-        for i in range(batch_size):
-            start = i * 32
-            private_key = random_blob[start:start + 32]
-            address = self._private_key_to_address(private_key)
-            yield (address, private_key.hex(), "")
+        addresses = []
+        for _ in range(batch_size):
+            address, private_key, mnemonic = self.generate_single_address()
+            addresses.append((address, private_key, mnemonic))
+        return addresses
 
     def generate_batch_gpu(self, batch_size: int = 10000) -> List[Tuple[str, str, str]]:
-        """使用GPU批量生成地址（不包含助记词）"""
-        return list(self.generate_batch_gpu_iter(batch_size))
-
-    def generate_batch_gpu_iter(self, batch_size: int = 10000):
-        """使用GPU批量生成地址（迭代器，不包含助记词）"""
+        """使用GPU批量生成地址（包含助记词）"""
         if not self.use_gpu or not CUPY_AVAILABLE:
-            yield from self.generate_batch_cpu_iter(batch_size)
-            return
-
-        if MNEMONIC_AVAILABLE and not self._gpu_mnemonic_warned:
-            print(f"{Fore.YELLOW}⚠ GPU模式不生成助记词，将仅生成私钥{Style.RESET_ALL}")
-            self._gpu_mnemonic_warned = True
-
-        private_keys = self._generate_private_keys_gpu(batch_size)
-        for private_key in private_keys:
-            address = self._private_key_to_address(private_key)
-            yield (address, private_key.hex(), "")
+            return self.generate_batch_cpu(batch_size)
+        
+        # GPU模式下暂时回退到CPU，因为助记词生成不支持GPU
+        return self.generate_batch_cpu(batch_size)
     
     def find_vanity_addresses(self, 
                             patterns: List[str], 
@@ -316,24 +274,19 @@ class TRXVanityGenerator:
         found_count = 0
         total_generated = 0
         
-        with tqdm(total=None, desc="已检查", unit="addr", dynamic_ncols=True) as pbar:
-            mode_msg = self.use_gpu and f"{Fore.GREEN}使用GPU生成地址...{Style.RESET_ALL}" or f"{Fore.YELLOW}使用CPU生成地址...{Style.RESET_ALL}"
-            tqdm.write(mode_msg)
+        with tqdm(total=max_addresses, desc="找到的靓号", unit="个") as pbar:
             while found_count < max_addresses:
                 # 生成地址批次
-                
                 if self.use_gpu:
-                    address_iter = self.generate_batch_gpu_iter(batch_size)
+                    addresses = self.generate_batch_gpu(batch_size)
                 else:
-                    address_iter = self.generate_batch_cpu_iter(batch_size)
-
+                    addresses = self.generate_batch_cpu(batch_size)
+                
+                total_generated += len(addresses)
+                
                 # 检查每个地址
-                update_interval = max(1000, batch_size // 100)
-                pending_updates = 0
-                for address, private_key, mnemonic in address_iter:
-                    total_generated += 1
+                for address, private_key, mnemonic in addresses:
                     is_vanity, pattern, score = self._check_vanity_pattern(address, patterns)
-                    pending_updates += 1
                     
                     if is_vanity:
                         vanity_addr = VanityAddress(
@@ -357,30 +310,14 @@ class TRXVanityGenerator:
                         print(f"助记词: {mnemonic}") # 显示助记词
                         print("-" * 30)
                         
+                        pbar.update(1)
+                        
                         if found_count >= max_addresses:
                             break
-
-                    if pending_updates >= update_interval:
-                        pbar.update(pending_updates)
-                        pending_updates = 0
                 
                 # 更新统计信息
-                if pending_updates > 0:
-                    pbar.update(pending_updates)
-
                 self.stats['total_generated'] = total_generated
                 self.stats['found_vanity'] = found_count
-
-                elapsed = time.time() - self.stats['start_time']
-                rate = found_count / elapsed if elapsed > 0 else 0
-                remaining = max_addresses - found_count
-                eta = remaining / rate if rate > 0 else 0
-                pbar.set_description(f"已检查 {total_generated:,}")
-                pbar.set_postfix({
-                    "elapsed": self._format_duration(elapsed),
-                    "eta": self._format_duration(eta),
-                    "found": f"{found_count}/{max_addresses}"
-                })
         
         # 保存结果
         if save_to_file:
@@ -414,16 +351,6 @@ class TRXVanityGenerator:
             json.dump(results, f, indent=2, ensure_ascii=False)
         
         print(f"\n{Fore.GREEN}结果已保存到: {filename}{Style.RESET_ALL}")
-
-    def _format_duration(self, seconds: float) -> str:
-        """格式化时长显示"""
-        seconds = max(0, int(seconds))
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        return f"{minutes:02d}:{secs:02d}"
     
     def print_stats(self):
         """打印统计信息"""
@@ -439,19 +366,35 @@ class TRXVanityGenerator:
         if self.stats['total_generated'] > 0:
             success_rate = (self.stats['found_vanity'] / self.stats['total_generated']) * 100
             print(f"成功率: {success_rate:.6f}%")
+    def _get_old_cupy_info(self):
+        """获取GPU算力信息（旧版本）"""
+        try:
+            dev = cp.cuda.Device(0)
+            attrs = dev.attributes
+            props = cp.cuda.runtime.getDeviceProperties(0)
+            name = props["name"].decode()
+            mp = attrs.get('MultiProcessorCount', '未知')
+            mem = dev.mem_info[1] // (1024**2)
+            cc =  f"{props['major']}.{props['minor']}"
+            return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+        except Exception as e:
+            return f"无法获取GPU信息: {e}"
     def _get_gpu_info(self):
         """获取GPU算力信息"""
         if not CUPY_AVAILABLE:
             return None
         try:
             dev = cp.cuda.Device(0)
-            attrs = dev.attributes
-            props = cp.cuda.runtime.getDeviceProperties(0)
-            name = props["name"].decode()
-            mp = attrs.get("MultiProcessorCount", "未知")
-            mem = dev.mem_info[1] // (1024 ** 2)  # 总内存MB
-            cc = f"{props['major']}.{props['minor']}"
-            return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+            try:
+             attrs = dev.attributes
+             name = dev.name
+             mp = attrs.get('MultiProcessorCount', '未知')
+             mem = dev.mem_info[1] // (1024 ** 2)  # 总内存MB
+             cc = f"{dev.compute_capability_major}.{dev.compute_capability_minor}"
+             return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+            except AttributeError:
+                return self._get_old_cupy_info()
+                
         except Exception as e:
             return f"无法获取GPU信息: {e}"
 
