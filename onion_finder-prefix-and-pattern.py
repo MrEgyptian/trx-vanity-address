@@ -141,30 +141,46 @@ class OnionVanityGenerator:
         addr = onion.replace('.onion', '')
         check = addr if case_sensitive else addr.lower()
 
-        # Prefix patterns: ONLY match at start
+        # Check prefix match
+        prefix_match = None  # (label, score)
         for pattern in prefix_patterns:
             target = pattern if case_sensitive else pattern.lower()
             if check.startswith(target):
-                score = len(pattern) * 10
-                return True, f"prefix:{pattern}", score
+                prefix_match = (f"prefix:{pattern}", len(pattern) * 10)
+                break
 
-        # General patterns: special patterns first, then literal matching
+        # Check general pattern match
+        general_match = None  # (label, score)
         for pattern in general_patterns:
             matched, label, score = self._matches_special_pattern(check, pattern)
             if matched:
-                return True, label, score
-
+                general_match = (label, score)
+                break
             # Literal string matching: prefix > suffix > contains
             target = pattern if case_sensitive else pattern.lower()
             if check.startswith(target):
-                score = len(pattern) * 10
-                return True, f"prefix:{pattern}", score
+                general_match = (f"prefix:{pattern}", len(pattern) * 10)
+                break
             elif check.endswith(target):
-                score = len(pattern) * 8
-                return True, f"suffix:{pattern}", score
+                general_match = (f"suffix:{pattern}", len(pattern) * 8)
+                break
             elif target in check:
-                score = len(pattern) * 5
-                return True, f"contains:{pattern}", score
+                general_match = (f"contains:{pattern}", len(pattern) * 5)
+                break
+
+        # Both specified → AND logic (both must match)
+        if prefix_patterns and general_patterns:
+            if prefix_match and general_match:
+                label = f"{prefix_match[0]} + {general_match[0]}"
+                score = prefix_match[1] + general_match[1]
+                return True, label, score
+            return False, "", 0
+
+        # Only one specified → just that one needs to match
+        if prefix_match:
+            return True, prefix_match[0], prefix_match[1]
+        if general_match:
+            return True, general_match[0], general_match[1]
         return False, "", 0
 
     def _matches_special_pattern(self, addr: str, pattern: str) -> Tuple[bool, str, int]:
