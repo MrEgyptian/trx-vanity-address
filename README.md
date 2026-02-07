@@ -38,7 +38,7 @@ pip install -r requirements.txt
 
 ### 系统要求
 
-- Python 3.7+
+- Python >3.7 | Python < 3.11
 - CUDA支持的GPU (推荐)
 - 至少4GB内存
 
