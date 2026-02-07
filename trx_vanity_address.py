@@ -70,6 +70,7 @@ class TRXVanityGenerator:
         
         if self.use_gpu:
             gpu_info = self._get_gpu_info()
+            print 
             print(f"{Fore.GREEN}✓ GPU加速已启用{Style.RESET_ALL}")
             if gpu_info:
                 print(f"{Fore.CYAN}GPU信息: {gpu_info}{Style.RESET_ALL}")
@@ -347,19 +348,35 @@ class TRXVanityGenerator:
         if self.stats['total_generated'] > 0:
             success_rate = (self.stats['found_vanity'] / self.stats['total_generated']) * 100
             print(f"成功率: {success_rate:.6f}%")
-
+    def _get_old_cupy_info(self):
+        """获取GPU算力信息（旧版本）"""
+        try:
+            dev = cp.cuda.Device(0)
+            attrs = dev.attributes
+            props = cp.cuda.runtime.getDeviceProperties(0)
+            name = props["name"].decode()
+            mp = attrs.get('MultiProcessorCount', '未知')
+            mem = dev.mem_info[1] // (1024**2)
+            cc =  f"{props['major']}.{props['minor']}"
+            return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+        except Exception as e:
+            return f"无法获取GPU信息: {e}"
     def _get_gpu_info(self):
         """获取GPU算力信息"""
         if not CUPY_AVAILABLE:
             return None
         try:
             dev = cp.cuda.Device(0)
-            attrs = dev.attributes
-            name = dev.name
-            mp = attrs.get('MultiProcessorCount', '未知')
-            mem = dev.mem_info[1] // (1024 ** 2)  # 总内存MB
-            cc = f"{dev.compute_capability_major}.{dev.compute_capability_minor}"
-            return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+            try:
+             attrs = dev.attributes
+             name = dev.name
+             mp = attrs.get('MultiProcessorCount', '未知')
+             mem = dev.mem_info[1] // (1024 ** 2)  # 总内存MB
+             cc = f"{dev.compute_capability_major}.{dev.compute_capability_minor}"
+             return f"{name} | SM数: {mp} | 总内存: {mem}MB | Compute Capability: {cc}"
+            except AttributeError:
+                return self._get_old_cupy_info()
+                
         except Exception as e:
             return f"无法获取GPU信息: {e}"
 
